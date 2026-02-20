@@ -1,0 +1,21 @@
+{
+  "name": "@aaaaorg/cronlint",
+  "version": "0.1.0",
+  "description": "Cron job cost & intelligence auditor for OpenClaw",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "cronlint": "index.js"
+  },
+  "keywords": ["cron", "openclaw", "cost", "audit", "lint", "optimization"],
+  "author": "kostadin <kostadin@aaaaorg>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aaaaorg/cronlint"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": ["index.js", "README.md", "LICENSE"]
+}
