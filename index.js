@@ -29,6 +29,10 @@ const MODEL_COSTS = {
   'opus': 30,
 };
 
+// Annotation to suppress recommendations for a job
+// Users add "cronlint:keep" or "cronlint:keep-model" in their cron prompt
+const KEEP_RE = /cronlint:\s*keep(?:-model)?/i;
+
 // Keywords that suggest a bash script could handle the task
 const BASH_PATTERNS = [
   /\bgit\s+(push|pull|status|add|commit)\b/i,
@@ -184,8 +188,12 @@ function classifyJob(job, runs, hours) {
     totalTokens: stats.totalTokens,
     classification: 'right-sized',
     recommendation: null,
+    confidence: null,
     estimatedSavingsPerDay: 0,
   };
+
+  // Respect cronlint:keep annotation — skip all recommendations
+  if (KEEP_RE.test(prompt)) return result;
 
   // Check bash-replaceable
   const bashScore = BASH_PATTERNS.reduce((s, p) => s + (p.test(prompt) ? 1 : 0), 0);
@@ -213,17 +221,20 @@ function classifyJob(job, runs, hours) {
 
   if (bashScore >= 2 && aiScore === 0) {
     result.classification = 'bash-replaceable';
-    result.recommendation = `Replace with bash script. Current: ${model} @ $${result.costPerDay}/day`;
+    result.confidence = bashScore >= 4 ? 'high' : bashScore >= 3 ? 'medium' : 'low';
+    result.recommendation = `Consider replacing with a bash script — verify the AI call isn't serving a functional purpose. Current: ${model} @ $${result.costPerDay}/day`;
     result.estimatedSavingsPerDay = result.costPerDay;
   } else if (runsPerDay > 10 && result.avgCostPerRun > 0.005) {
     result.classification = 'frequency-excessive';
+    result.confidence = runsPerDay > 50 ? 'high' : 'medium';
     const suggestedFreq = Math.max(4, Math.round(runsPerDay / 4));
-    result.recommendation = `Reduce from ${result.runsPerDay}/day to ${suggestedFreq}/day (or switch to bash)`;
+    result.recommendation = `Consider reducing from ${result.runsPerDay}/day to ${suggestedFreq}/day (or switching to bash)`;
     result.estimatedSavingsPerDay = result.costPerDay * 0.75;
   } else if (haikuScore > 0 && aiScore === 0 && !model.includes('haiku')) {
     result.classification = 'model-downgrade';
+    result.confidence = haikuScore >= 2 ? 'high' : 'medium';
     const ratio = (MODEL_COSTS[model] || 6) / 1.6;
-    result.recommendation = `Downgrade to Haiku (${ratio.toFixed(1)}x cheaper)`;
+    result.recommendation = `Consider downgrading to Haiku (${ratio.toFixed(1)}x cheaper) — check if the task needs stronger reasoning`;
     result.estimatedSavingsPerDay = result.costPerDay * (1 - 1 / ratio);
   }
 
@@ -271,7 +282,8 @@ function formatText(results, minSavings) {
       const color = classColors[r.classification] || '';
       const emoji = classEmoji[r.classification] || '';
       out += `${emoji} ${color}${B}${r.name}${N} ${D}(${r.schedule})${N}\n`;
-      out += `   ${color}${r.classification}${N} · model: ${r.model} · ${r.runsPerDay} runs/day · $${r.costPerDay.toFixed(2)}/day\n`;
+      const conf = r.confidence ? ` · confidence: ${r.confidence}` : '';
+      out += `   ${color}${r.classification}${N} · model: ${r.model} · ${r.runsPerDay} runs/day · $${r.costPerDay.toFixed(2)}/day${conf}\n`;
       out += `   💡 ${r.recommendation}\n`;
       out += `   💰 Save: ${G}$${r.estimatedSavingsPerMonth.toFixed(2)}/month${N}\n\n`;
     }
@@ -287,6 +299,10 @@ function formatText(results, minSavings) {
 
   const totalSavings = actionable.reduce((s, r) => s + r.estimatedSavingsPerMonth, 0);
   out += `\n${B}📊 Total potential savings: $${totalSavings.toFixed(2)}/month${N}\n`;
+  if (actionable.length > 0) {
+    out += `\n${D}ℹ️  Recommendations are suggestions — review each before acting.${N}\n`;
+    out += `${D}   Add "cronlint:keep" to a job's prompt to suppress recommendations.${N}\n`;
+  }
 
   return out;
 }
